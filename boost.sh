@@ -16,10 +16,12 @@ trap 'echo; echo "👋 Exiting booster."; exit 0' SIGINT
 
 # bootstrap DNS list if missing
 [[ ! -f $DNS_LIST ]] && cat > $DNS_LIST <<EOF
-1.1.1.1
-8.8.8.8
-9.9.9.9
-114.114.114.114
+124.6.181.25
+124.6.181.26
+124.6.181.27
+124.6.181.31
+124.6.181.160
+124.6.181.171
 EOF
 
 color_ping(){
