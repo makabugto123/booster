@@ -1,13 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/bash
-#
-# booster1.sh — test ONE domain across MANY DNS servers
-# usage:   ./booster1.sh
-# stops on Ctrl+C
+# booster_multi.sh — test MANY domains across MANY DNS servers
 
 VER="2.2.2"
-DOMAIN="vpn.kagerou.site"        # ← set your single domain here
+# List all the domains you want to probe:
+DOMAINS=( "google.com" "youtube.com" "facebook.com" )
+
 DNS_LIST="$HOME/.dns_list.txt"   # one DNS IP per line
-DIG_BIN="~/go/bin/fastdig"       # or just "dig"
+DIG_BIN="dig"                    # or your fastdig path
 FAIL_LIMIT=5
 DELAY=5                           # seconds between loops
 VPN_IF="tun0"
@@ -17,15 +16,12 @@ trap 'echo; echo "👋 Exiting booster."; exit 0' SIGINT
 
 # bootstrap DNS list if missing
 [[ ! -f $DNS_LIST ]] && cat > $DNS_LIST <<EOF
-124.6.181.25
-124.6.181.26
-124.6.181.27
-124.6.181.31
-124.6.181.160
-124.6.181.171
+1.1.1.1
+8.8.8.8
+9.9.9.9
+114.114.114.114
 EOF
 
-# color-coded ping
 color_ping(){
   local ms=$1
   if   (( ms<=100 )); then printf "\e[32m%4sms FAST\e[0m\n" "$ms"
@@ -40,12 +36,10 @@ restart_vpn(){
 }
 
 main(){
-  local loop=0 failsum
+  local loop=0 total_fail
   while true; do
     ((loop++))
-    failsum=0
     echo -e "\n[+] GTM | BOOSTER v$VER | Loop #$loop"
-    echo -e "    Testing: \e[1;36m$DOMAIN\e[0m"
     echo -e "    🟢 FAST ≤100ms   🟡 MED ≤250ms   🔴 SLOW >250ms"
 
     # check VPN
@@ -54,32 +48,37 @@ main(){
       restart_vpn
     fi
 
-    # loop over DNS servers
-    while read -r ip; do
-      [[ -z $ip ]] && continue
-      echo -e "\n⮞ $DOMAIN @ $ip"
+    total_fail=0
+    # outer loop: domains
+    for domain in "${DOMAINS[@]}"; do
+      echo -e "\n=== Testing DOMAIN: \e[1;36m$domain\e[0m ==="
+      # inner loop: DNS servers
+      while read -r ip; do
+        [[ -z $ip ]] && continue
+        echo -e "\n⮞ $domain @ $ip"
 
-      # ping
-      if out=$(ping -c1 -W2 "$ip" 2>/dev/null); then
-        ms=$(awk -F'time=' '/time=/{print int($2)}' <<<"$out")
-        printf "   Ping: "; color_ping "$ms"
-      else
-        echo -e "   Ping: \e[31mTIMEOUT\e[0m"
-        ((failsum++))
-        continue
-      fi
+        # ping test
+        if out=$(ping -c1 -W2 "$ip" 2>/dev/null); then
+          ms=$(awk -F'time=' '/time=/{print int($2)}' <<<"$out")
+          printf "   Ping: "; color_ping "$ms"
+        else
+          echo -e "   Ping: \e[31mTIMEOUT\e[0m"
+          ((total_fail++))
+          continue
+        fi
 
-      # DNS lookup
-      if timeout 3 $DIG_BIN @"$ip" "$DOMAIN" &>/dev/null; then
-        echo -e "   DNS : \e[32mOK\e[0m"
-      else
-        echo -e "   DNS : \e[31mFAIL\e[0m"
-        ((failsum++))
-      fi
-    done < "$DNS_LIST"
+        # DNS lookup test
+        if timeout 3 $DIG_BIN @"$ip" "$domain" &>/dev/null; then
+          echo -e "   DNS : \e[32mOK\e[0m"
+        else
+          echo -e "   DNS : \e[31mFAIL\e[0m"
+          ((total_fail++))
+        fi
+      done < "$DNS_LIST"
+    done
 
-    echo -e "\n📊 Failures this loop: $failsum"
-    if (( failsum >= FAIL_LIMIT )); then
+    echo -e "\n📊 Total failures this loop: $total_fail"
+    if (( total_fail >= FAIL_LIMIT )); then
       echo -e "⚠️  Too many fails — restarting tunnel"
       restart_vpn
     fi
